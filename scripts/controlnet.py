@@ -692,155 +692,185 @@ class Script(scripts.Script, metaclass=(
                     control_lora = model_net.control_model
                     bind_control_lora(unet, control_lora)
                     p.controlnet_control_loras.append(control_lora)
-
-            input_image, image_from_a1111 = Script.choose_input_image(p, unit, idx)
-            if image_from_a1111:
-                a1111_i2i_resize_mode = getattr(p, "resize_mode", None)
-                if a1111_i2i_resize_mode is not None:
-                    resize_mode = external_code.resize_mode_from_value(a1111_i2i_resize_mode)
-            
-            a1111_mask_image : Optional[Image.Image] = getattr(p, "image_mask", None)
-            if 'inpaint' in unit.module and not image_has_mask(input_image) and a1111_mask_image is not None:
-                a1111_mask = np.array(prepare_mask(a1111_mask_image, p))
-                if a1111_mask.ndim == 2:
-                    if a1111_mask.shape[0] == input_image.shape[0]:
-                        if a1111_mask.shape[1] == input_image.shape[1]:
-                            input_image = np.concatenate([input_image[:, :, 0:3], a1111_mask[:, :, None]], axis=2)
-                            a1111_i2i_resize_mode = getattr(p, "resize_mode", None)
-                            if a1111_i2i_resize_mode is not None:
-                                resize_mode = external_code.resize_mode_from_value(a1111_i2i_resize_mode)
-
-            if 'reference' not in unit.module and issubclass(type(p), StableDiffusionProcessingImg2Img) \
-                    and p.inpaint_full_res and a1111_mask_image is not None:
-                logger.debug("A1111 inpaint mask START")
-                input_image = [input_image[:, :, i] for i in range(input_image.shape[2])]
-                input_image = [Image.fromarray(x) for x in input_image]
-
-                mask = prepare_mask(a1111_mask_image, p)
-
-                crop_region = masking.get_crop_region(np.array(mask), p.inpaint_full_res_padding)
-                crop_region = masking.expand_crop_region(crop_region, p.width, p.height, mask.width, mask.height)
-
-                input_image = [
-                    images.resize_image(resize_mode.int_value(), i, mask.width, mask.height) 
-                    for i in input_image
-                ]
-
-                input_image = [x.crop(crop_region) for x in input_image]
-                input_image = [
-                    images.resize_image(external_code.ResizeMode.OUTER_FIT.int_value(), x, p.width, p.height) 
-                    for x in input_image
-                ]
-
-                input_image = [np.asarray(x)[:, :, 0] for x in input_image]
-                input_image = np.stack(input_image, axis=2)
-                logger.debug("A1111 inpaint mask END")
-
-            if 'inpaint_only' == unit.module and issubclass(type(p), StableDiffusionProcessingImg2Img) and p.image_mask is not None:
-                logger.warning('A1111 inpaint and ControlNet inpaint duplicated. ControlNet support enabled.')
-                unit.module = 'inpaint'
-
-            # safe numpy
-            logger.debug("Safe numpy convertion START")
-            input_image = np.ascontiguousarray(input_image.copy()).copy()
-            logger.debug("Safe numpy convertion END")
-
-            logger.info(f"Loading preprocessor: {unit.module}")
-            preprocessor = self.preprocessor[unit.module]
-
-            high_res_fix = isinstance(p, StableDiffusionProcessingTxt2Img) and getattr(p, 'enable_hr', False)
-
-            h = (p.height // 8) * 8
-            w = (p.width // 8) * 8
-
-            if high_res_fix:
-                if p.hr_resize_x == 0 and p.hr_resize_y == 0:
-                    hr_y = int(p.height * p.hr_scale)
-                    hr_x = int(p.width * p.hr_scale)
-                else:
-                    hr_y, hr_x = p.hr_resize_y, p.hr_resize_x
-                hr_y = (hr_y // 8) * 8
-                hr_x = (hr_x // 8) * 8
+            if isinstance(unit.image, list):
+                input_images_list = unit.image
             else:
-                hr_y = h
-                hr_x = w
+                input_images_list = [unit.image]
+            
+            controls = []
+            for input_image in input_images_list:
+                unit.image = input_image
+                input_image, image_from_a1111 = Script.choose_input_image(p, unit, idx)
+                if image_from_a1111:
+                    a1111_i2i_resize_mode = getattr(p, "resize_mode", None)
+                    if a1111_i2i_resize_mode is not None:
+                        resize_mode = external_code.resize_mode_from_value(a1111_i2i_resize_mode)
+                
+                a1111_mask_image : Optional[Image.Image] = getattr(p, "image_mask", None)
+                if 'inpaint' in unit.module and not image_has_mask(input_image) and a1111_mask_image is not None:
+                    a1111_mask = np.array(prepare_mask(a1111_mask_image, p))
+                    if a1111_mask.ndim == 2:
+                        if a1111_mask.shape[0] == input_image.shape[0]:
+                            if a1111_mask.shape[1] == input_image.shape[1]:
+                                input_image = np.concatenate([input_image[:, :, 0:3], a1111_mask[:, :, None]], axis=2)
+                                a1111_i2i_resize_mode = getattr(p, "resize_mode", None)
+                                if a1111_i2i_resize_mode is not None:
+                                    resize_mode = external_code.resize_mode_from_value(a1111_i2i_resize_mode)
 
-            if unit.module == 'inpaint_only+lama' and resize_mode == external_code.ResizeMode.OUTER_FIT:
-                # inpaint_only+lama is special and required outpaint fix
-                _, input_image = Script.detectmap_proc(input_image, unit.module, resize_mode, hr_y, hr_x)
+                if 'reference' not in unit.module and issubclass(type(p), StableDiffusionProcessingImg2Img) \
+                        and p.inpaint_full_res and a1111_mask_image is not None:
+                    logger.debug("A1111 inpaint mask START")
+                    input_image = [input_image[:, :, i] for i in range(input_image.shape[2])]
+                    input_image = [Image.fromarray(x) for x in input_image]
 
-            control_model_type = ControlModelType.ControlNet
-            global_average_pooling = False
+                    mask = prepare_mask(a1111_mask_image, p)
 
-            if 'reference' in unit.module:
-                control_model_type = ControlModelType.AttentionInjection
-            elif 'revision' in unit.module:
-                control_model_type = ControlModelType.ReVision
-            elif hasattr(model_net, 'control_model') and (isinstance(model_net.control_model, Adapter) or isinstance(model_net.control_model, Adapter_light)):
-                control_model_type = ControlModelType.T2I_Adapter
-            elif hasattr(model_net, 'control_model') and isinstance(model_net.control_model, StyleAdapter):
-                control_model_type = ControlModelType.T2I_StyleAdapter
-            elif isinstance(model_net, PlugableIPAdapter):
-                control_model_type = ControlModelType.IPAdapter
-            elif isinstance(model_net, PlugableControlLLLite):
-                control_model_type = ControlModelType.Controlllite
+                    crop_region = masking.get_crop_region(np.array(mask), p.inpaint_full_res_padding)
+                    crop_region = masking.expand_crop_region(crop_region, p.width, p.height, mask.width, mask.height)
 
-            if control_model_type is ControlModelType.ControlNet:
-                global_average_pooling = model_net.control_model.global_average_pooling
+                    input_image = [
+                        images.resize_image(resize_mode.int_value(), i, mask.width, mask.height) 
+                        for i in input_image
+                    ]
 
-            preprocessor_resolution = unit.processor_res
-            if unit.pixel_perfect:
-                preprocessor_resolution = external_code.pixel_perfect_resolution(
-                    input_image,
-                    target_H=h,
-                    target_W=w,
-                    resize_mode=resize_mode
+                    input_image = [x.crop(crop_region) for x in input_image]
+                    input_image = [
+                        images.resize_image(external_code.ResizeMode.OUTER_FIT.int_value(), x, p.width, p.height) 
+                        for x in input_image
+                    ]
+
+                    input_image = [np.asarray(x)[:, :, 0] for x in input_image]
+                    input_image = np.stack(input_image, axis=2)
+                    logger.debug("A1111 inpaint mask END")
+
+                if 'inpaint_only' == unit.module and issubclass(type(p), StableDiffusionProcessingImg2Img) and p.image_mask is not None:
+                    logger.warning('A1111 inpaint and ControlNet inpaint duplicated. ControlNet support enabled.')
+                    unit.module = 'inpaint'
+
+                # safe numpy
+                logger.debug("Safe numpy convertion START")
+                input_image = np.ascontiguousarray(input_image.copy()).copy()
+                logger.debug("Safe numpy convertion END")
+
+                logger.info(f"Loading preprocessor: {unit.module}")
+                preprocessor = self.preprocessor[unit.module]
+
+                high_res_fix = isinstance(p, StableDiffusionProcessingTxt2Img) and getattr(p, 'enable_hr', False)
+
+                h = (p.height // 8) * 8
+                w = (p.width // 8) * 8
+
+                if high_res_fix:
+                    if p.hr_resize_x == 0 and p.hr_resize_y == 0:
+                        hr_y = int(p.height * p.hr_scale)
+                        hr_x = int(p.width * p.hr_scale)
+                    else:
+                        hr_y, hr_x = p.hr_resize_y, p.hr_resize_x
+                    hr_y = (hr_y // 8) * 8
+                    hr_x = (hr_x // 8) * 8
+                else:
+                    hr_y = h
+                    hr_x = w
+
+                if unit.module == 'inpaint_only+lama' and resize_mode == external_code.ResizeMode.OUTER_FIT:
+                    # inpaint_only+lama is special and required outpaint fix
+                    _, input_image = Script.detectmap_proc(input_image, unit.module, resize_mode, hr_y, hr_x)
+
+                control_model_type = ControlModelType.ControlNet
+                global_average_pooling = False
+
+                if 'reference' in unit.module:
+                    control_model_type = ControlModelType.AttentionInjection
+                elif 'revision' in unit.module:
+                    control_model_type = ControlModelType.ReVision
+                elif hasattr(model_net, 'control_model') and (isinstance(model_net.control_model, Adapter) or isinstance(model_net.control_model, Adapter_light)):
+                    control_model_type = ControlModelType.T2I_Adapter
+                elif hasattr(model_net, 'control_model') and isinstance(model_net.control_model, StyleAdapter):
+                    control_model_type = ControlModelType.T2I_StyleAdapter
+                elif isinstance(model_net, PlugableIPAdapter):
+                    control_model_type = ControlModelType.IPAdapter
+                elif isinstance(model_net, PlugableControlLLLite):
+                    control_model_type = ControlModelType.Controlllite
+
+                if control_model_type is ControlModelType.ControlNet:
+                    global_average_pooling = model_net.control_model.global_average_pooling
+
+                preprocessor_resolution = unit.processor_res
+                if unit.pixel_perfect:
+                    preprocessor_resolution = external_code.pixel_perfect_resolution(
+                        input_image,
+                        target_H=h,
+                        target_W=w,
+                        resize_mode=resize_mode
+                    )
+
+                logger.info(f'preprocessor resolution = {preprocessor_resolution}')
+                # Preprocessor result may depend on numpy random operations, use the
+                # random seed in `StableDiffusionProcessing` to make the 
+                # preprocessor result reproducable.
+                # Currently following preprocessors use numpy random:
+                # - shuffle
+                seed = set_numpy_seed(p)
+                logger.debug(f"Use numpy seed {seed}.")
+                detected_map, is_image = preprocessor(
+                    input_image, 
+                    res=preprocessor_resolution, 
+                    thr_a=unit.threshold_a,
+                    thr_b=unit.threshold_b,
                 )
 
-            logger.info(f'preprocessor resolution = {preprocessor_resolution}')
-            # Preprocessor result may depend on numpy random operations, use the
-            # random seed in `StableDiffusionProcessing` to make the 
-            # preprocessor result reproducable.
-            # Currently following preprocessors use numpy random:
-            # - shuffle
-            seed = set_numpy_seed(p)
-            logger.debug(f"Use numpy seed {seed}.")
-            detected_map, is_image = preprocessor(
-                input_image, 
-                res=preprocessor_resolution, 
-                thr_a=unit.threshold_a,
-                thr_b=unit.threshold_b,
-            )
-
-            if high_res_fix:
-                if is_image:
-                    hr_control, hr_detected_map = Script.detectmap_proc(detected_map, unit.module, resize_mode, hr_y, hr_x)
-                    detected_maps.append((hr_detected_map, unit.module))
+                if high_res_fix:
+                    if is_image:
+                        hr_control, hr_detected_map = Script.detectmap_proc(detected_map, unit.module, resize_mode, hr_y, hr_x)
+                        detected_maps.append((hr_detected_map, unit.module))
+                    else:
+                        hr_control = detected_map
                 else:
-                    hr_control = detected_map
-            else:
-                hr_control = None
+                    hr_control = None
 
-            if is_image:
-                control, detected_map = Script.detectmap_proc(detected_map, unit.module, resize_mode, h, w)
-                detected_maps.append((detected_map, unit.module))
-            else:
-                control = detected_map
-                detected_maps.append((input_image, unit.module))
+                if is_image:
+                    control, detected_map = Script.detectmap_proc(detected_map, unit.module, resize_mode, h, w)
+                    detected_maps.append((detected_map, unit.module))
+                else:
+                    control = detected_map
+                    detected_maps.append((input_image, unit.module))
 
-            if control_model_type == ControlModelType.T2I_StyleAdapter:
-                control = control['last_hidden_state']
+                if control_model_type == ControlModelType.T2I_StyleAdapter:
+                    control = control['last_hidden_state']
 
-            if control_model_type == ControlModelType.ReVision:
-                control = control['image_embeds']
+                if control_model_type == ControlModelType.ReVision:
+                    control = control['image_embeds']
 
-            preprocessor_dict = dict(
-                name=unit.module,
-                preprocessor_resolution=preprocessor_resolution,
-                threshold_a=unit.threshold_a,
-                threshold_b=unit.threshold_b
-            )
-
+                preprocessor_dict = dict(
+                    name=unit.module,
+                    preprocessor_resolution=preprocessor_resolution,
+                    threshold_a=unit.threshold_a,
+                    threshold_b=unit.threshold_b
+                )
+                controls.append(control)
+                
+            def avarge_controls(controls):
+                if isinstance(controls[0], dict):
+                    keys = list(controls[0].keys())
+                    avg_control = {}
+                    for k in keys:
+                        avg_control[k] = avarge_controls([c[k] for c in controls])
+                    return avg_control 
+                        
+                elif isinstance(controls[0],list):
+                    avg_control = []
+                    for i in range(len(controls[0])):
+                        avg_control.append(avarge_controls([c[i] for c in controls]))
+                    return avarge_controls
+                elif isinstance(controls[0], torch.Tensor):
+                    return torch.stack(controls, 0).mean(0)
+                
+                else:
+                    logger.warning(f"(Can't get the avarge of {len(controls)} {type(controls[0])}(s), will use index 0 as input")
+                    return controls[0]
+                
+            control = avarge_controls(controls) if len(controls) > 1 else controls[0]
+                                
             forward_param = ControlParams(
                 control_model=model_net,
                 preprocessor=preprocessor_dict,
