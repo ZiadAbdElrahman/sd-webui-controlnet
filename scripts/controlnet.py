@@ -861,7 +861,8 @@ class Script(scripts.Script, metaclass=(
                     avg_control = []
                     for i in range(len(controls[0])):
                         avg_control.append(avarge_controls([c[i] for c in controls]))
-                    return avarge_controls
+                    return avg_control
+                    
                 elif isinstance(controls[0], torch.Tensor):
                     return torch.stack(controls, 0).mean(0)
                 
