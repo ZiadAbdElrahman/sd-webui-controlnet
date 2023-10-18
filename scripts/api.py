@@ -1,5 +1,6 @@
 from typing import List
 
+import torch
 import numpy as np
 from fastapi import FastAPI, Body
 from fastapi.exceptions import HTTPException
@@ -24,6 +25,27 @@ def encode_to_base64(image):
         return encode_np_to_base64(image)
     else:
         return ""
+
+def avarge_controls(controls):
+    if isinstance(controls[0], dict):
+        keys = list(controls[0].keys())
+        avg_control = {}
+        for k in keys:
+            avg_control[k] = avarge_controls([c[k] for c in controls])
+        return avg_control 
+            
+    elif isinstance(controls[0],list):
+        avg_control = []
+        for i in range(len(controls[0])):
+            avg_control.append(avarge_controls([c[i] for c in controls]))
+        return avg_control
+        
+    elif isinstance(controls[0], torch.Tensor):
+        return torch.stack(controls, 0).mean(0)
+
+    else:
+        logger.warning(f"(Can't get the avarge of {len(controls)} {type(controls[0])}(s), will use index 0 as input")
+        return controls[0]
 
 
 def encode_np_to_base64(image):
@@ -94,6 +116,7 @@ def controlnet_api(_: gr.Blocks, app: FastAPI):
         ),
         controlnet_threshold_a: float = Body(64, title="Controlnet Threshold a"),
         controlnet_threshold_b: float = Body(64, title="Controlnet Threshold b"),
+        save_name: str = Body('', title="saving name for the output"),
     ):
         controlnet_module = global_state.reverse_preprocessor_aliases.get(
             controlnet_module, controlnet_module
@@ -140,6 +163,12 @@ def controlnet_api(_: gr.Blocks, app: FastAPI):
                 assert json_acceptor.value is not None
                 poses.append(json_acceptor.value)
 
+        if 'ip-adapter' in controlnet_module and save_name != '':
+            avg_results = avarge_controls(results)
+            save_dir = f'/codebase/stable-diffusion-webui/models/clip_emp/{save_name}.ckpt'
+            
+            torch.save(avg_results, save_dir)
+            
         global_state.cn_preprocessor_unloadable.get(controlnet_module, lambda: None)()
         results64 = list(map(encode_to_base64, results))
         res = {"images": results64, "info": "Success"}
