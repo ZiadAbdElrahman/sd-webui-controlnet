@@ -82,7 +82,48 @@ def swap_img2img_pipeline(p: processing.StableDiffusionProcessingImg2Img):
             continue
         setattr(p, k, v)
 
+def avarge_controls(controls):
+    if isinstance(controls[0], dict):
+        keys = list(controls[0].keys())
+        avg_control = {}
+        for k in keys:
+            avg_control[k] = avarge_controls([c[k] for c in controls])
+        return avg_control 
+            
+    elif isinstance(controls[0],list):
+        avg_control = []
+        for i in range(len(controls[0])):
+            avg_control.append(avarge_controls([c[i] for c in controls]))
+        return avg_control
+        
+    elif isinstance(controls[0], torch.Tensor):
+        return torch.stack(controls, 0).mean(0)
+    
+    else:
+        logger.warning(f"(Can't get the avarge of {len(controls)} {type(controls[0])}(s), will use index 0 as input")
+        return controls[0]
 
+def subtract_controls(c1, c2, weight):
+    if isinstance(c1, dict):
+        keys = list(c1.keys())
+        output_control = {}
+        for k in keys:
+            output_control[k] = subtract_controls(c1[k], c2[k], weight)
+        return output_control 
+            
+    elif isinstance(c1,list):
+        output_control = []
+        for i in range(len(c1)):
+            output_control.append(subtract_controls(c1[i], c2[i], weight))
+        return output_control
+        
+    elif isinstance(c1, torch.Tensor):
+        return c1 - c2 * weight
+    
+    else:
+        logger.warning(f"(Can't subtract {type(controls[0])}(s), will not change c1")
+        return c1
+    
 global_state.update_cn_models()
 
 
@@ -698,10 +739,22 @@ class Script(scripts.Script, metaclass=(
                 input_images_list = [unit.image]
             controls = []
             
+            clip_models_dir = '/codebase/stable-diffusion-webui/models/clip_emp'
+            if not os.path.exists(f'{clip_models_dir}/avg.ckpt'):
+                clip_models_names = os.listdir(clip_models_dir)
+                if len(clip_models_names) > 1:
+                    clip_models = [torch.load(f'{clip_models_dir}/{m}') for m in clip_models_names]
+                    clip_avg = avarge_controls(clip_models)
+                    torch.save(clip_avg, f'{clip_models_dir}/avg.ckpt')
+                    
             if 'saved_identity_' in unit.image:
                 unit.image = unit.image.replace('saved_identity_', '')
                 load_dir = f'/codebase/stable-diffusion-webui/models/clip_emp/{unit.image}.ckpt'
-                controls = [torch.load(load_dir)]
+                control = torch.load(load_dir)
+                if os.path.exists(f'{clip_models_dir}/avg.ckpt'):
+                    avg = torch.load(f'{clip_models_dir}/avg.ckpt')
+                    control = subtract_controls(control, avg, 0.55)
+                controls = [control]
                 global_average_pooling = False
                 control_model_type = ControlModelType.IPAdapter
                 preprocessor_resolution = unit.processor_res
@@ -867,26 +920,6 @@ class Script(scripts.Script, metaclass=(
                 )
                 controls.append(control)
                 
-            def avarge_controls(controls):
-                if isinstance(controls[0], dict):
-                    keys = list(controls[0].keys())
-                    avg_control = {}
-                    for k in keys:
-                        avg_control[k] = avarge_controls([c[k] for c in controls])
-                    return avg_control 
-                        
-                elif isinstance(controls[0],list):
-                    avg_control = []
-                    for i in range(len(controls[0])):
-                        avg_control.append(avarge_controls([c[i] for c in controls]))
-                    return avg_control
-                    
-                elif isinstance(controls[0], torch.Tensor):
-                    return torch.stack(controls, 0).mean(0)
-                
-                else:
-                    logger.warning(f"(Can't get the avarge of {len(controls)} {type(controls[0])}(s), will use index 0 as input")
-                    return controls[0]
                 
             control = avarge_controls(controls) if len(controls) > 1 else controls[0]
                                 
