@@ -1,5 +1,6 @@
 from typing import List
 
+import os
 import torch
 import numpy as np
 from fastapi import FastAPI, Body
@@ -164,6 +165,7 @@ def controlnet_api(_: gr.Blocks, app: FastAPI):
                 poses.append(json_acceptor.value)
 
         if 'ip-adapter' in controlnet_module and save_name != '':
+            os.makedirs('/codebase/stable-diffusion-webui/models/clip_emp', exist_ok=True)
             avg_results = avarge_controls(results)
             save_dir = f'/codebase/stable-diffusion-webui/models/clip_emp/{save_name}.ckpt'
             
