@@ -696,9 +696,27 @@ class Script(scripts.Script, metaclass=(
                 input_images_list = unit.image
             else:
                 input_images_list = [unit.image]
-            
             controls = []
+            
+            if 'saved_identity_' in unit.image:
+                unit.image = unit.image.replace('saved_identity_', '')
+                load_dir = f'/codebase/stable-diffusion-webui/models/clip_emp/{unit.image}.ckpt'
+                controls = [torch.load(load_dir)]
+                global_average_pooling = False
+                control_model_type = ControlModelType.IPAdapter
+                preprocessor_resolution = unit.processor_res
+                preprocessor_dict = dict(
+                    name=unit.module,
+                    preprocessor_resolution=preprocessor_resolution,
+                    threshold_a=unit.threshold_a,
+                    threshold_b=unit.threshold_b
+                )
+                hr_control = False 
+                
+                
             for input_image in input_images_list:
+                if len(controls) > 0 :
+                    break
                 unit.image = input_image
                 input_image, image_from_a1111 = Script.choose_input_image(p, unit, idx)
                 if image_from_a1111:
