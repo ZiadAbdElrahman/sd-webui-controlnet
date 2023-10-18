@@ -294,7 +294,10 @@ def clear_all_ip_adapter():
 class PlugableIPAdapter(torch.nn.Module):
     def __init__(self, state_dict, clip_embeddings_dim, is_plus):
         super().__init__()
+        print('state_dict', state_dict.keys())
         self.sdxl = clip_embeddings_dim == 1280 and not is_plus
+        self.sdxl = True
+        
         self.is_plus = is_plus
         self.ipadapter = IPAdapterModel(state_dict, clip_embeddings_dim=clip_embeddings_dim, is_plus=is_plus)
         self.disable_memory_management = True
