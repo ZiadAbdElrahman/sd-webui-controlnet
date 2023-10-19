@@ -31,7 +31,9 @@ class ImageProjModel(torch.nn.Module):
 class To_KV(torch.nn.Module):
     def __init__(self, cross_attention_dim):
         super().__init__()
-
+        # print(SD_XL_CHANNELS)
+        print('SD_XL_CHANNELS', len(SD_XL_CHANNELS))
+        print('SD_V12_CHANNELS', len(SD_V12_CHANNELS))
         channels = SD_XL_CHANNELS if cross_attention_dim == 2048 else SD_V12_CHANNELS
         self.to_kvs = torch.nn.ModuleList(
             [torch.nn.Linear(cross_attention_dim, channel, bias=False) for channel in channels])
@@ -168,20 +170,23 @@ class IPAdapterModel(torch.nn.Module):
 
         if self.is_plus:
             self.clip_extra_context_tokens = 16
-
+            self.cross_attention_dim = 1280
+            output_dim = 2048
+            self.ip_layers_cross_attention_dim = 2048
+            
             self.image_proj_model = Resampler(
                 dim=self.cross_attention_dim,
                 depth=4,
                 dim_head=64,
-                heads=12,
+                heads=20,
                 num_queries=self.clip_extra_context_tokens,
                 embedding_dim=clip_embeddings_dim,
-                output_dim=self.cross_attention_dim,
+                output_dim=output_dim,
                 ff_mult=4
             )
         else:
             self.clip_extra_context_tokens = state_dict["image_proj"]["proj.weight"].shape[0] // self.cross_attention_dim
-
+            self.ip_layers_cross_attention_dim = self.cross_attention_dim
             self.image_proj_model = ImageProjModel(
                 cross_attention_dim=self.cross_attention_dim,
                 clip_embeddings_dim=clip_embeddings_dim,
@@ -192,7 +197,7 @@ class IPAdapterModel(torch.nn.Module):
 
     def load_ip_adapter(self, state_dict):
         self.image_proj_model.load_state_dict(state_dict["image_proj"])
-        self.ip_layers = To_KV(self.cross_attention_dim)
+        self.ip_layers = To_KV(self.ip_layers_cross_attention_dim)
         self.ip_layers.load_state_dict(state_dict["ip_adapter"])
 
     @torch.inference_mode()
@@ -295,6 +300,7 @@ class PlugableIPAdapter(torch.nn.Module):
     def __init__(self, state_dict, clip_embeddings_dim, is_plus):
         super().__init__()
         print('state_dict', state_dict.keys())
+        print(clip_embeddings_dim, is_plus)
         self.sdxl = clip_embeddings_dim == 1280 and not is_plus
         self.sdxl = True
         
