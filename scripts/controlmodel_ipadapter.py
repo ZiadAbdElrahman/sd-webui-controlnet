@@ -160,7 +160,7 @@ class Resampler(nn.Module):
 
 
 class IPAdapterModel(torch.nn.Module):
-    def __init__(self, state_dict, clip_embeddings_dim, is_plus):
+    def __init__(self, state_dict, clip_embeddings_dim, is_plus, is_sdxl):
         super().__init__()
         self.device = "cpu"
 
@@ -169,16 +169,25 @@ class IPAdapterModel(torch.nn.Module):
         self.is_plus = is_plus
 
         if self.is_plus:
-            self.clip_extra_context_tokens = 16
-            self.cross_attention_dim = 1280
-            output_dim = 2048
-            self.ip_layers_cross_attention_dim = 2048
-            
+            if is_sdxl:
+                self.clip_extra_context_tokens = 16
+                self.cross_attention_dim = 1280
+                output_dim = 2048
+                self.ip_layers_cross_attention_dim = 2048
+                heads = 20
+
+            else:
+                heads = 12
+                self.clip_extra_context_tokens = 16
+                self.cross_attention_dim = state_dict["ip_adapter"]["1.to_k_ip.weight"].shape[1]
+                output_dim = state_dict["ip_adapter"]["1.to_k_ip.weight"].shape[1]
+                self.ip_layers_cross_attention_dim = state_dict["ip_adapter"]["1.to_k_ip.weight"].shape[1]
+                
             self.image_proj_model = Resampler(
                 dim=self.cross_attention_dim,
                 depth=4,
                 dim_head=64,
-                heads=20,
+                heads=heads,
                 num_queries=self.clip_extra_context_tokens,
                 embedding_dim=clip_embeddings_dim,
                 output_dim=output_dim,
@@ -299,13 +308,16 @@ def clear_all_ip_adapter():
 class PlugableIPAdapter(torch.nn.Module):
     def __init__(self, state_dict, clip_embeddings_dim, is_plus):
         super().__init__()
-        print('state_dict', state_dict.keys())
-        print(clip_embeddings_dim, is_plus)
-        self.sdxl = clip_embeddings_dim == 1280 and not is_plus
-        self.sdxl = True
+        # print('state_dict', state_dict.keys())
+        # print(clip_embeddings_dim, is_plus)
+        # print('state_dict[image_proj]', state_dict['image_proj'].keys())
+        # print('state_dict[ip_adapter]', state_dict['ip_adapter'].keys())
+        # print('\n')
+        # self.sdxl = clip_embeddings_dim == 1280 and not is_plus
+        self.sdxl = '139.to_v_ip.weight' in list(state_dict['ip_adapter'].keys())
         
         self.is_plus = is_plus
-        self.ipadapter = IPAdapterModel(state_dict, clip_embeddings_dim=clip_embeddings_dim, is_plus=is_plus)
+        self.ipadapter = IPAdapterModel(state_dict, clip_embeddings_dim=clip_embeddings_dim, is_plus=is_plus, is_sdxl=self.sdxl)
         self.disable_memory_management = True
         self.dtype = None
         self.weight = 1.0
