@@ -749,11 +749,15 @@ class Script(scripts.Script, metaclass=(
                     
             if 'saved_identity_' in unit.image:
                 unit.image = unit.image.replace('saved_identity_', '')
+                clip_emb_info = unit.image.split(':')
+                unit.image = clip_emb_info[0]
+                weight = float(clip_emb_info[1])
+
                 load_dir = f'/codebase/stable-diffusion-webui/models/clip_emp/{unit.image}.ckpt'
                 control = torch.load(load_dir)
                 if os.path.exists(f'{clip_models_dir}/avg.ckpt'):
                     avg = torch.load(f'{clip_models_dir}/avg.ckpt')
-                    control = subtract_controls(control, avg, 0.55)
+                    control = subtract_controls(control, avg, weight)
                 controls = [control]
                 global_average_pooling = False
                 control_model_type = ControlModelType.IPAdapter
